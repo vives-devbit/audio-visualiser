@@ -32,14 +32,15 @@ for i in range(p.get_device_count()):
 if not input_devices:
     raise RuntimeError("No input devices found.")
 
-device_index = int(input("Select input device index: "))
+# device_index = int(input("Select input device index: "))
+device_index = 0  # Default to the first device
 if device_index not in input_devices:
     raise ValueError("Invalid device index.")
 
 # -------------------------------
 # Audio Parameters
 # -------------------------------
-CHUNK = 2048 # Size of each audio chunk
+CHUNK = 1024 # Size of each audio chunk
 RATE = int(p.get_device_info_by_index(device_index)["defaultSampleRate"])
 CHANNELS = 1
 FORMAT = pyaudio.paInt16
@@ -66,7 +67,7 @@ def resource_path(relative_path):
         return os.path.join(sys._MEIPASS, relative_path)
     return os.path.join(os.path.abspath("."), relative_path)
 
-logo_path = resource_path("Logo VIVES Hogeschool - Smile.png")
+logo_path = resource_path("Logo VIVES Hogeschool - Smile - wit.png")
 # logo_img = pg.ImageItem(pg.imread(logo_path))
 
 # -------------------------------
@@ -93,7 +94,7 @@ margin = 20
 def position_logo():
     logo_label.move(
         win.width() - logo_label.width() - margin,
-        margin
+        margin * 2 + win.height() // 2 - logo_label.width() // 2  # Adjust vertical position
     )
 # Call once and also on resize
 position_logo()
@@ -106,43 +107,62 @@ if USE_OPENGL:
 else:
     print("⚠️ OpenGL not available. Falling back to CPU rendering.")
 
+# scrolling Time Domain Plot of 10 seconds
+plot_time1 = win.addPlot(title="Tijds-domein (10 seconden)", **font_style)
+plot_time1.setYRange(-10000, 10000) # (-32768, 32767)
+curve_time1 = plot_time1.plot(pen=pg.mkPen('c', width=2))
+plot_time1.setLabel('left', "Geluidssterkte", **font_style)
+plot_time1.setLabel('bottom', "Tijd", units='s', **font_style)
+
+# Number of points to display in the scrolling plot
+display_points = 20000
+scroll_time = 10  # seconds
+plot_time1.setXRange(0, scroll_time)  # Show 10 seconds of data
+
+# Buffer for the interpolated display (initialize with zeros)
+scroll_x = np.linspace(0, scroll_time, display_points)
+scroll_y = np.zeros(display_points, dtype=np.float32)
+
 # Time Domain Plot
-plot_time = win.addPlot(title="Time Domain", **font_style)
+win.nextCol()
+plot_time = win.addPlot(title="Tijds-domein (%d milliseconden)"%(int(CHUNK / RATE*1000)), **font_style)
 plot_time.setYRange(-10000, 10000) # (-32768, 32767)
 curve_time = plot_time.plot(pen=pg.mkPen('c', width=2))
-plot_time.setLabel('left', "Amplitude", **font_style)
-plot_time.setLabel('bottom', "Time", units='s', **font_style)
+plot_time.setLabel('left', "Geluidssterkte", **font_style)
+plot_time.setLabel('bottom', "Tijd", units='s', **font_style)
 plot_time.setXRange(0, CHUNK / RATE)
 
 # Frequency Spectrum
 win.nextRow()
-plot_fft = win.addPlot(title="Frequency Spectrum (FFT)", **font_style)
+plot_fft = win.addPlot(title="Frequentie-domein (spectrum)", **font_style, colspan=3)
 curve_fft = plot_fft.plot(pen=pg.mkPen('m', width=2))
-plot_fft.setLabel('left', "Magnitude", **font_style)
-plot_fft.setLabel('bottom', "Frequency", units='Hz', **font_style)
+plot_fft.setLabel('left', "Geluidssterkte", **font_style)
+plot_fft.setLabel('bottom', "Frequency (aantal golven per seconde)", units='Hz', **font_style)
 plot_fft.setXRange(0, RATE / 2)
-plot_fft.setLogMode(x=False, y=True)
-plot_fft.setYRange(-2, 4)
+plot_fft.setLogMode(x=False, y=False)
+# plot_fft.setYRange(-2, 4)
+plot_fft.setYRange(0, 500)
 
 # Scrolling Spectrogram
 win.nextRow()
-spec_len = 200
+spec_len = int(scroll_time * (RATE / 2) / (CHUNK * 2))  # Number of columns in the spectrogram
 fft_bins = CHUNK // 2 + 1
 spec_data = np.zeros((spec_len, fft_bins))
 img_spec = pg.ImageItem()
-plot_spec = win.addPlot(title="Scrolling Spectrogram", **font_style)
+plot_spec = win.addPlot(title="Scrolling Spectrogram", **font_style, colspan=3)
 plot_spec.addItem(img_spec)
+plot_spec.setXRange(0, scroll_time) # Show 10 seconds of data
 
-# Set the image scale so that the y-axis matches the frequency range
-img_spec.setImage(spec_data, autoLevels=False, rect=pg.QtCore.QRectF(0, 0, spec_len, RATE/2))
+# Set the image scale so that the y-axis matches the frequency range and the x-axis matches the time range
+img_spec.setImage(spec_data, autoLevels=False, rect=pg.QtCore.QRectF(0, 0, scroll_time, RATE/2))
 img_spec.setLookupTable(pg.colormap.get('inferno').getLookupTable())
-img_spec.setLevels([0, 50])  # adjusted for log scaling
+img_spec.setLevels([0, 100])  # adjusted for log scaling
 
 # Set the plot's y-limits to match the frequency range
 plot_spec.setLimits(xMin=0, xMax=fft_bins, yMin=0, yMax=RATE / 4)
 # plot_spec.setYRange(0, RATE / 2)
 
-plot_spec.setLabel('bottom', "Time", units='s', **font_style)
+plot_spec.setLabel('bottom', "Tijd", units='s', **font_style)
 plot_spec.setLabel('left', "Frequency", units='Hz', **font_style)
 
 
@@ -153,12 +173,29 @@ def update():
     data = stream.read(CHUNK, exception_on_overflow=False)
     audio_data = np.frombuffer(data, dtype=np.int16)
 
+     # --- Scrolling Time Domain Plot (10s, interpolated, incremental) ---
+    global scroll_y
+
+    # Interpolate only the new chunk to the display resolution
+    # chunk_time = np.linspace(0, scroll_time, len(curve_time1))
+    new_time = np.linspace(scroll_time - (CHUNK / RATE), scroll_time, CHUNK, endpoint=False)
+    new_interp_x = np.linspace(scroll_time - (CHUNK / RATE), scroll_time, int(display_points * CHUNK / (CHUNK * 100)), endpoint=False)
+    new_interp_y = np.interp(new_interp_x, new_time, audio_data)
+
+    # Shift the buffer and append new points
+    n_new = len(new_interp_y)
+    scroll_y = np.roll(scroll_y, -n_new)
+    scroll_y[-n_new:] = new_interp_y
+
+    # Update the plot
+    curve_time1.setData(scroll_x, scroll_y)
+
     # Time-domain
     x_time = np.arange(CHUNK) / RATE
     curve_time.setData(x_time, audio_data)
 
     # FFT
-    windowed = audio_data * np.hanning(len(audio_data))
+    windowed = audio_data * np.hamming(len(audio_data))
     fft_data = np.abs(np.fft.rfft(windowed)) / CHUNK
     fft_freqs = np.fft.rfftfreq(CHUNK, 1 / RATE)
     curve_fft.setData(fft_freqs, fft_data)
@@ -166,9 +203,9 @@ def update():
     # Spectrogram
     global spec_data
     spec_data[:-1] = spec_data[1:]
-    # spec_data[-1] = fft_data
-    spec_data[-1] = 20 * np.log10(np.clip(fft_data, 1e-10, None))
-    img_spec.setImage(spec_data, autoLevels=False, rect=pg.QtCore.QRectF(0, 0, spec_len, RATE/2))
+    spec_data[-1] = fft_data
+    # spec_data[-1] = 20 * np.log10(np.clip(fft_data, 1e-10, None))
+    img_spec.setImage(spec_data, autoLevels=False, rect=pg.QtCore.QRectF(0, 0, scroll_time, RATE/2))
     
 
 # Timer for 30fps
