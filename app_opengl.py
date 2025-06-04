@@ -5,7 +5,7 @@ import pyaudio
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtWidgets
 from PyQt5.QtWidgets import QLabel
-from PyQt5.QtGui import QPixmap
+from PyQt5.QtGui import QPixmap, QFont
 from PyQt5.QtCore import Qt
 
 # -------------------------------
@@ -108,7 +108,8 @@ else:
     print("⚠️ OpenGL not available. Falling back to CPU rendering.")
 
 # scrolling Time Domain Plot of 10 seconds
-plot_time1 = win.addPlot(title="Tijds-domein (10 seconden)", **font_style)
+plot_time1 = win.addPlot(title="", **font_style)
+plot_time1.setTitle('<span style="font-size:22pt; font-weight:bold; color:white;">Geluid microfoon (10 seconden)</span>')
 plot_time1.setYRange(-10000, 10000) # (-32768, 32767)
 curve_time1 = plot_time1.plot(pen=pg.mkPen('c', width=2))
 plot_time1.setLabel('left', "Geluidssterkte", **font_style)
@@ -125,7 +126,8 @@ scroll_y = np.zeros(display_points, dtype=np.float32)
 
 # Time Domain Plot
 win.nextCol()
-plot_time = win.addPlot(title="Tijds-domein (%d milliseconden)"%(int(CHUNK / RATE*1000)), **font_style)
+plot_time = win.addPlot(title="", **font_style)
+plot_time.setTitle(f'<span style="font-size:22pt; font-weight:bold; color:white;">Detail geluid ({int(CHUNK / RATE*1000)} milliseconden)</span>')
 plot_time.setYRange(-10000, 10000) # (-32768, 32767)
 curve_time = plot_time.plot(pen=pg.mkPen('c', width=2))
 plot_time.setLabel('left', "Geluidssterkte", **font_style)
@@ -134,10 +136,11 @@ plot_time.setXRange(0, CHUNK / RATE)
 
 # Frequency Spectrum
 win.nextRow()
-plot_fft = win.addPlot(title="Frequentie-domein (spectrum)", **font_style, colspan=3)
+plot_fft = win.addPlot(title="", **font_style, colspan=3)
+plot_fft.setTitle('<span style="font-size:22pt; font-weight:bold; color:white;">Verdeling toonhoogtes (spectrum)</span>')
 curve_fft = plot_fft.plot(pen=pg.mkPen('m', width=2))
 plot_fft.setLabel('left', "Geluidssterkte", **font_style)
-plot_fft.setLabel('bottom', "Frequency (aantal golven per seconde)", units='Hz', **font_style)
+plot_fft.setLabel('bottom', "Frequentie of toonhoogte", units='Hz', **font_style)
 plot_fft.setXRange(0, RATE / 2)
 plot_fft.setLogMode(x=False, y=False)
 # plot_fft.setYRange(-2, 4)
@@ -149,7 +152,8 @@ spec_len = int(scroll_time * (RATE / 2) / (CHUNK * 2))  # Number of columns in t
 fft_bins = CHUNK // 2 + 1
 spec_data = np.zeros((spec_len, fft_bins))
 img_spec = pg.ImageItem()
-plot_spec = win.addPlot(title="Scrolling Spectrogram", **font_style, colspan=3)
+plot_spec = win.addPlot(title="", **font_style, colspan=3)
+plot_spec.setTitle('<span style="font-size:22pt; font-weight:bold; color:white;">Verdeling toonhoogtes over tijd (spectrogram)</span>')
 plot_spec.addItem(img_spec)
 plot_spec.setXRange(0, scroll_time) # Show 10 seconds of data
 
@@ -158,12 +162,17 @@ img_spec.setImage(spec_data, autoLevels=False, rect=pg.QtCore.QRectF(0, 0, scrol
 img_spec.setLookupTable(pg.colormap.get('inferno').getLookupTable())
 img_spec.setLevels([0, 100])  # adjusted for log scaling
 
+# show the colorbar
+color_bar = pg.ColorBarItem(values=(0, 100), colorMap=pg.colormap.get('inferno'))
+color_bar.setImageItem(img_spec, insert_in=plot_spec)
+color_bar.axis.setLabel("Geluidssterkte", units=None, **font_style)
+
 # Set the plot's y-limits to match the frequency range
 plot_spec.setLimits(xMin=0, xMax=fft_bins, yMin=0, yMax=RATE / 4)
 # plot_spec.setYRange(0, RATE / 2)
 
 plot_spec.setLabel('bottom', "Tijd", units='s', **font_style)
-plot_spec.setLabel('left', "Frequency", units='Hz', **font_style)
+plot_spec.setLabel('left', "Frequentie", units='Hz', **font_style)
 
 
 # -------------------------------
